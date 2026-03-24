@@ -1,4 +1,5 @@
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useState, useCallback } from 'react';
 import {
@@ -93,26 +94,33 @@ export default function KhataScreen() {
         style={({ pressed }) => [styles.customerRow, pressed && styles.customerRowPressed]}
         onPress={() => router.push({ pathname: '/customer/[id]', params: { id: item.id.toString() } })}
       >
-        <View style={[styles.avatar, { backgroundColor: getAvatarColor(item.name) }]}>
-          <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+        <View style={[styles.avatar, { backgroundColor: getAvatarColor(item.name) + '15' }]}>
+          <Text style={[styles.avatarText, { color: getAvatarColor(item.name) }]}>{getInitials(item.name)}</Text>
         </View>
         <View style={styles.customerInfo}>
           <Text style={styles.customerName} numberOfLines={1}>{item.name}</Text>
-          <Text style={styles.customerDate}>
-            {item.type === 'supplier' ? 'Supplier' : 'Customer'}
-            {item.phone ? ` \u00B7 ${item.phone}` : ''}
-          </Text>
+          <View style={styles.customerMeta}>
+            <View style={[styles.typePill, { backgroundColor: item.type === 'supplier' ? Colors.greenBg : Colors.primaryBg }]}>
+              <Text style={[styles.typePillText, { color: item.type === 'supplier' ? Colors.green : Colors.primary }]}>
+                {item.type === 'supplier' ? 'Supplier' : 'Customer'}
+              </Text>
+            </View>
+            {item.phone ? <Text style={styles.customerPhone}>{item.phone}</Text> : null}
+          </View>
         </View>
         <View style={styles.balanceContainer}>
           {balance !== 0 ? (
-            <Text style={[styles.balanceAmount, { color: isPositive ? Colors.red : Colors.green }]}>
-              {formatAmount(balance)}
-            </Text>
+            <>
+              <Text style={[styles.balanceAmount, { color: isPositive ? Colors.red : Colors.green }]}>
+                {formatAmount(balance)}
+              </Text>
+              <Text style={[styles.balanceLabel, { color: isPositive ? Colors.red : Colors.green }]}>
+                {isPositive ? "You'll Get" : "You'll Give"}
+              </Text>
+            </>
           ) : (
-            <Text style={[styles.balanceAmount, { color: Colors.textMuted }]}>Rs 0</Text>
+            <Text style={[styles.balanceAmount, { color: Colors.textMuted }]}>Settled</Text>
           )}
-          {balance > 0 && <Text style={styles.balanceLabel}>You'll Get</Text>}
-          {balance < 0 && <Text style={[styles.balanceLabel, { color: Colors.green }]}>You'll Give</Text>}
         </View>
       </Pressable>
     );
@@ -121,33 +129,52 @@ export default function KhataScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === 'web' ? 67 : 0) }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Khata Book</Text>
+        <View>
+          <Text style={styles.headerTitle}>Khata Book</Text>
+          <Text style={styles.headerSubtitle}>Maher Zarai Markaz</Text>
+        </View>
         <Pressable
           style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }]}
           onPress={() => {}}
         >
-          <Feather name="download" size={20} color={Colors.text} />
+          <Feather name="bell" size={20} color={Colors.text} />
         </Pressable>
       </View>
 
       <View style={styles.summaryCard}>
-        <View style={styles.summaryRow}>
-          <Pressable style={styles.summaryItem} onPress={() => setActiveTab('customers')}>
-            <Text style={styles.summaryLabel}>You Will Get</Text>
-            <Text style={[styles.summaryAmount, { color: Colors.red }]}>
-              {formatAmount(stats.totalReceivable)}
-            </Text>
-            <Text style={styles.summaryCount}>{stats.customerCount} Customers</Text>
-          </Pressable>
-          <View style={styles.summaryDivider} />
-          <Pressable style={styles.summaryItem} onPress={() => setActiveTab('suppliers')}>
-            <Text style={styles.summaryLabel}>You Will Give</Text>
-            <Text style={[styles.summaryAmount, { color: Colors.green }]}>
-              {formatAmount(stats.totalPayable)}
-            </Text>
-            <Text style={styles.summaryCount}>{stats.supplierCount} Suppliers</Text>
-          </Pressable>
-        </View>
+        <Pressable style={styles.summaryItem} onPress={() => setActiveTab('customers')}>
+          <LinearGradient
+            colors={[Colors.dangerGradientStart, Colors.dangerGradientEnd]}
+            style={styles.summaryIconCircle}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <Feather name="arrow-up-right" size={16} color={Colors.white} />
+          </LinearGradient>
+          <Text style={styles.summaryLabel}>You Will Get</Text>
+          <Text style={[styles.summaryAmount, { color: Colors.red }]}>
+            {formatAmount(stats.totalReceivable)}
+          </Text>
+          <Text style={styles.summaryCount}>{stats.customerCount} customers</Text>
+        </Pressable>
+
+        <View style={styles.summaryDivider} />
+
+        <Pressable style={styles.summaryItem} onPress={() => setActiveTab('suppliers')}>
+          <LinearGradient
+            colors={[Colors.successGradientStart, Colors.successGradientEnd]}
+            style={styles.summaryIconCircle}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <Feather name="arrow-down-left" size={16} color={Colors.white} />
+          </LinearGradient>
+          <Text style={styles.summaryLabel}>You Will Give</Text>
+          <Text style={[styles.summaryAmount, { color: Colors.green }]}>
+            {formatAmount(stats.totalPayable)}
+          </Text>
+          <Text style={styles.summaryCount}>{stats.supplierCount} suppliers</Text>
+        </Pressable>
       </View>
 
       <View style={styles.tabBar}>
@@ -174,8 +201,8 @@ export default function KhataScreen() {
           onChangeText={setSearchQuery}
         />
         {searchQuery ? (
-          <Pressable onPress={() => setSearchQuery('')}>
-            <Feather name="x" size={18} color={Colors.textMuted} />
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Feather name="x-circle" size={18} color={Colors.textMuted} />
           </Pressable>
         ) : null}
       </View>
@@ -191,8 +218,13 @@ export default function KhataScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <MaterialCommunityIcons name="account-group-outline" size={48} color={Colors.textMuted} />
-            <Text style={styles.emptyText}>No customers found</Text>
+            <View style={styles.emptyIconWrap}>
+              <MaterialCommunityIcons name="account-group-outline" size={48} color={Colors.textMuted} />
+            </View>
+            <Text style={styles.emptyTitle}>No customers found</Text>
+            <Text style={styles.emptyText}>
+              {searchQuery ? 'Try a different search term' : 'Add your first customer to get started'}
+            </Text>
           </View>
         }
       />
@@ -202,8 +234,15 @@ export default function KhataScreen() {
           style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
           onPress={() => router.push('/add-customer')}
         >
-          <Feather name="plus" size={24} color={Colors.white} />
-          <Text style={styles.fabText}>ADD CUSTOMER</Text>
+          <LinearGradient
+            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+            style={styles.fabGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Feather name="plus" size={20} color={Colors.white} />
+            <Text style={styles.fabText}>ADD CUSTOMER</Text>
+          </LinearGradient>
         </Pressable>
       )}
     </View>
@@ -219,7 +258,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
     backgroundColor: Colors.white,
   },
@@ -228,9 +267,15 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.bold,
     color: Colors.text,
   },
+  headerSubtitle: {
+    fontSize: FontSize.xs,
+    fontFamily: FontFamily.medium,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
   headerBtn: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: BorderRadius.full,
     backgroundColor: Colors.background,
     alignItems: 'center',
@@ -241,17 +286,23 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.lg,
-    ...Shadow.medium,
-  },
-  summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    ...Shadow.medium,
   },
   summaryItem: {
     flex: 1,
     paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.md,
     alignItems: 'center',
+  },
+  summaryIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
   },
   summaryLabel: {
     fontSize: FontSize.xs,
@@ -260,19 +311,19 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   summaryAmount: {
-    fontSize: FontSize.xl,
+    fontSize: FontSize.lg,
     fontFamily: FontFamily.bold,
   },
   summaryCount: {
-    fontSize: FontSize.xs,
+    fontSize: FontSize.xxs,
     fontFamily: FontFamily.regular,
     color: Colors.textMuted,
     marginTop: Spacing.xs,
   },
   summaryDivider: {
     width: 1,
-    height: 50,
-    backgroundColor: Colors.border,
+    height: 60,
+    backgroundColor: Colors.borderLight,
   },
   tabBar: {
     flexDirection: 'row',
@@ -285,7 +336,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.sm + 2,
     alignItems: 'center',
     borderRadius: BorderRadius.sm,
   },
@@ -308,8 +359,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
-    height: 44,
-    ...Shadow.small,
+    height: 46,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
   },
   searchIcon: {
     marginRight: Spacing.sm,
@@ -319,7 +371,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     fontFamily: FontFamily.regular,
     color: Colors.text,
-    height: 44,
+    height: 46,
   },
   listContent: {
     paddingTop: Spacing.md,
@@ -333,14 +385,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     marginBottom: Spacing.sm,
-    ...Shadow.small,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
   },
   customerRowPressed: {
     backgroundColor: Colors.primaryBg,
+    borderColor: Colors.primary + '30',
   },
   avatar: {
-    width: 44,
-    height: 44,
+    width: 46,
+    height: 46,
     borderRadius: BorderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
@@ -349,7 +403,6 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: FontSize.md,
     fontFamily: FontFamily.bold,
-    color: Colors.white,
   },
   customerInfo: {
     flex: 1,
@@ -360,11 +413,25 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.semiBold,
     color: Colors.text,
   },
-  customerDate: {
+  customerMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: Spacing.sm,
+  },
+  typePill: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.xs,
+  },
+  typePillText: {
+    fontSize: FontSize.xxs,
+    fontFamily: FontFamily.semiBold,
+  },
+  customerPhone: {
     fontSize: FontSize.xs,
     fontFamily: FontFamily.regular,
     color: Colors.textMuted,
-    marginTop: 2,
   },
   balanceContainer: {
     alignItems: 'flex-end',
@@ -374,37 +441,53 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.bold,
   },
   balanceLabel: {
-    fontSize: FontSize.xs,
-    fontFamily: FontFamily.regular,
-    color: Colors.red,
+    fontSize: FontSize.xxs,
+    fontFamily: FontFamily.medium,
     marginTop: 2,
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: Spacing.xxxxl,
-    gap: Spacing.md,
+    paddingVertical: Spacing.jumbo,
+    gap: Spacing.sm,
+  },
+  emptyIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  emptyTitle: {
+    fontSize: FontSize.lg,
+    fontFamily: FontFamily.semiBold,
+    color: Colors.text,
   },
   emptyText: {
-    fontSize: FontSize.md,
-    fontFamily: FontFamily.medium,
+    fontSize: FontSize.sm,
+    fontFamily: FontFamily.regular,
     color: Colors.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.xxxl,
   },
   fab: {
     position: 'absolute',
-    bottom: 80,
+    bottom: 90,
     right: Spacing.lg,
+    borderRadius: BorderRadius.full,
+    ...Shadow.medium,
+  },
+  fabPressed: {
+    transform: [{ scale: 0.95 }],
+  },
+  fabGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.full,
     gap: Spacing.sm,
-    ...Shadow.medium,
-  },
-  fabPressed: {
-    backgroundColor: Colors.primaryDark,
-    transform: [{ scale: 0.95 }],
   },
   fabText: {
     fontSize: FontSize.sm,

@@ -1,4 +1,5 @@
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useState, useCallback } from 'react';
 import {
@@ -18,7 +19,7 @@ import { FontFamily, FontSize, Spacing, BorderRadius, Shadow } from '@/constants
 import { useAuth } from '@/contexts/AuthContext';
 import { getProducts, getLowStockProducts, type Product } from '@/database';
 
-type StockTab = 'all' | 'low';
+type StockTab = 'all' | 'low' | 'out';
 
 export default function StockScreen() {
   const insets = useSafeAreaInsets();
@@ -27,19 +28,20 @@ export default function StockScreen() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [totalValue, setTotalValue] = useState(0);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
 
   const loadData = useCallback(async () => {
     try {
-      let data: Product[];
+      const all = await getProducts();
+      setAllProducts(all);
       if (activeTab === 'low') {
-        data = await getLowStockProducts();
+        const data = await getLowStockProducts();
+        setProducts(data);
+      } else if (activeTab === 'out') {
+        setProducts(all.filter(p => p.stock_quantity <= 0));
       } else {
-        data = await getProducts();
+        setProducts(all);
       }
-      setProducts(data);
-      const value = data.reduce((sum, p) => sum + (p.stock_quantity * p.sale_price), 0);
-      setTotalValue(value);
     } catch (e) {
       console.error('Error loading products:', e);
     }
@@ -61,8 +63,9 @@ export default function StockScreen() {
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const inStockCount = products.filter(p => p.stock_quantity > 0).length;
-  const outOfStockCount = products.filter(p => p.stock_quantity === 0).length;
+  const inStockCount = allProducts.filter(p => p.stock_quantity > 0).length;
+  const outOfStockCount = allProducts.filter(p => p.stock_quantity <= 0).length;
+  const lowStockCount = allProducts.filter(p => p.stock_quantity > 0 && p.stock_quantity <= p.low_stock_threshold).length;
 
   const getUnitLabel = (unit: string) => {
     const labels: Record<string, string> = {
@@ -72,7 +75,7 @@ export default function StockScreen() {
     return labels[unit] || unit;
   };
 
-  const getCategoryIcon = (category: string | null) => {
+  const getCategoryIcon = (category: string | null): string => {
     switch (category) {
       case 'Fertilizer': return 'leaf';
       case 'Pesticide': return 'bug-outline';
@@ -81,87 +84,140 @@ export default function StockScreen() {
     }
   };
 
-  const renderProduct = ({ item }: { item: Product }) => (
-    <Pressable
-      style={({ pressed }) => [styles.productRow, pressed && styles.productRowPressed]}
-      onPress={() => {}}
-    >
-      <View style={[styles.productIcon, {
-        backgroundColor: item.stock_quantity > 0 ? Colors.greenBg : Colors.redBg
-      }]}>
-        <MaterialCommunityIcons
-          name={getCategoryIcon(item.category) as any}
-          size={20}
-          color={item.stock_quantity > 0 ? Colors.green : Colors.red}
-        />
-      </View>
-      <View style={styles.productInfo}>
-        <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
-        <Text style={styles.productUnit}>{getUnitLabel(item.unit)}</Text>
-      </View>
-      <View style={styles.stockContainer}>
-        <Text style={[
-          styles.stockQty,
-          { color: item.stock_quantity > 0 ? Colors.green : Colors.red }
-        ]}>
-          {item.stock_quantity}
-        </Text>
-        <Text style={styles.stockUnit}>{item.unit}</Text>
-      </View>
-    </Pressable>
-  );
+  const getCategoryColor = (category: string | null): string => {
+    switch (category) {
+      case 'Fertilizer': return Colors.green;
+      case 'Pesticide': return Colors.red;
+      case 'Seed': return Colors.warning;
+      default: return Colors.info;
+    }
+  };
+
+  const renderProduct = ({ item }: { item: Product }) => {
+    const isOutOfStock = item.stock_quantity <= 0;
+    const isLowStock = !isOutOfStock && item.stock_quantity <= item.low_stock_threshold;
+    const catColor = getCategoryColor(item.category);
+
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.productRow, pressed && styles.productRowPressed]}
+        onPress={() => router.push({ pathname: '/add-stock', params: { productId: item.id.toString() } })}
+      >
+        <View style={[styles.productIcon, { backgroundColor: catColor + '12' }]}>
+          <MaterialCommunityIcons
+            name={getCategoryIcon(item.category) as any}
+            size={20}
+            color={catColor}
+          />
+        </View>
+        <View style={styles.productInfo}>
+          <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
+          <View style={styles.productMeta}>
+            <Text style={styles.productCategory}>{item.category || 'General'}</Text>
+            <Text style={styles.productDot}>{'\u00B7'}</Text>
+            <Text style={styles.productUnit}>{getUnitLabel(item.unit)}</Text>
+          </View>
+        </View>
+        <View style={styles.stockContainer}>
+          <Text style={[
+            styles.stockQty,
+            { color: isOutOfStock ? Colors.red : isLowStock ? Colors.warning : Colors.green }
+          ]}>
+            {item.stock_quantity}
+          </Text>
+          {isOutOfStock && (
+            <View style={[styles.stockBadge, { backgroundColor: Colors.redBg }]}>
+              <Text style={[styles.stockBadgeText, { color: Colors.red }]}>Out</Text>
+            </View>
+          )}
+          {isLowStock && (
+            <View style={[styles.stockBadge, { backgroundColor: Colors.warningBg }]}>
+              <Text style={[styles.stockBadgeText, { color: Colors.warningDark }]}>Low</Text>
+            </View>
+          )}
+          {!isOutOfStock && !isLowStock && (
+            <Text style={styles.stockUnit}>{item.unit}</Text>
+          )}
+        </View>
+      </Pressable>
+    );
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === 'web' ? 67 : 0) }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Stock Book</Text>
-        <Pressable
-          style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }]}
-          onPress={() => {}}
-        >
-          <Feather name="download" size={20} color={Colors.text} />
-        </Pressable>
+        <View>
+          <Text style={styles.headerTitle}>Stock Book</Text>
+          <Text style={styles.headerSubtitle}>{allProducts.length} products tracked</Text>
+        </View>
+        <View style={styles.headerActions}>
+          <Pressable
+            style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }]}
+            onPress={() => router.push({ pathname: '/add-stock', params: { type: 'in' } })}
+          >
+            <Feather name="arrow-down-circle" size={20} color={Colors.green} />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.headerBtn, pressed && { opacity: 0.7 }]}
+            onPress={() => router.push({ pathname: '/add-stock', params: { type: 'out' } })}
+          >
+            <Feather name="arrow-up-circle" size={20} color={Colors.red} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.statsRow}>
-        <View style={[styles.statCard, { backgroundColor: Colors.primaryBg }]}>
-          <Text style={styles.statValue}>{products.length}</Text>
-          <Text style={styles.statLabel}>Total Items</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: Colors.greenBg }]}>
+        <Pressable style={styles.statCard} onPress={() => setActiveTab('all')}>
+          <LinearGradient
+            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+            style={styles.statIconCircle}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <Feather name="package" size={14} color={Colors.white} />
+          </LinearGradient>
+          <Text style={[styles.statValue, { color: Colors.primary }]}>{allProducts.length}</Text>
+          <Text style={styles.statLabel}>Total</Text>
+        </Pressable>
+        <Pressable style={styles.statCard} onPress={() => setActiveTab('all')}>
+          <View style={[styles.statIconCircle, { backgroundColor: Colors.greenBg }]}>
+            <Feather name="check-circle" size={14} color={Colors.green} />
+          </View>
           <Text style={[styles.statValue, { color: Colors.green }]}>{inStockCount}</Text>
           <Text style={styles.statLabel}>In Stock</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: Colors.redBg }]}>
-          <Text style={[styles.statValue, { color: Colors.red }]}>{outOfStockCount}</Text>
-          <Text style={styles.statLabel}>Out of Stock</Text>
-        </View>
-      </View>
-
-      <View style={styles.reportButtons}>
-        <Pressable style={[styles.reportBtn, { backgroundColor: Colors.greenBg }]} onPress={() => {}}>
-          <Feather name="arrow-down-circle" size={16} color={Colors.green} />
-          <Text style={[styles.reportBtnText, { color: Colors.green }]}>Stock IN Report</Text>
         </Pressable>
-        <Pressable style={[styles.reportBtn, { backgroundColor: Colors.redBg }]} onPress={() => {}}>
-          <Feather name="arrow-up-circle" size={16} color={Colors.red} />
-          <Text style={[styles.reportBtnText, { color: Colors.red }]}>Stock OUT Report</Text>
+        <Pressable style={styles.statCard} onPress={() => setActiveTab('low')}>
+          <View style={[styles.statIconCircle, { backgroundColor: Colors.warningBg }]}>
+            <Feather name="alert-triangle" size={14} color={Colors.warning} />
+          </View>
+          <Text style={[styles.statValue, { color: Colors.warning }]}>{lowStockCount}</Text>
+          <Text style={styles.statLabel}>Low</Text>
+        </Pressable>
+        <Pressable style={styles.statCard} onPress={() => setActiveTab('out')}>
+          <View style={[styles.statIconCircle, { backgroundColor: Colors.redBg }]}>
+            <Feather name="x-circle" size={14} color={Colors.red} />
+          </View>
+          <Text style={[styles.statValue, { color: Colors.red }]}>{outOfStockCount}</Text>
+          <Text style={styles.statLabel}>Out</Text>
         </Pressable>
       </View>
 
       <View style={styles.tabBar}>
-        <Pressable
-          style={[styles.tab, activeTab === 'all' && styles.tabActive]}
-          onPress={() => setActiveTab('all')}
-        >
-          <Text style={[styles.tabText, activeTab === 'all' && styles.tabTextActive]}>All Items</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === 'low' && styles.tabActive]}
-          onPress={() => setActiveTab('low')}
-        >
-          <Text style={[styles.tabText, activeTab === 'low' && styles.tabTextActive]}>Low Stock</Text>
-        </Pressable>
+        {([
+          { key: 'all', label: 'All Items' },
+          { key: 'low', label: 'Low Stock' },
+          { key: 'out', label: 'Out of Stock' },
+        ] as { key: StockTab; label: string }[]).map(tab => (
+          <Pressable
+            key={tab.key}
+            style={[styles.tab, activeTab === tab.key && styles.tabActive]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
 
       <View style={styles.searchContainer}>
@@ -174,8 +230,8 @@ export default function StockScreen() {
           onChangeText={setSearchQuery}
         />
         {searchQuery ? (
-          <Pressable onPress={() => setSearchQuery('')}>
-            <Feather name="x" size={18} color={Colors.textMuted} />
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Feather name="x-circle" size={18} color={Colors.textMuted} />
           </Pressable>
         ) : null}
       </View>
@@ -191,8 +247,13 @@ export default function StockScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Feather name="package" size={48} color={Colors.textMuted} />
-            <Text style={styles.emptyText}>No products found</Text>
+            <View style={styles.emptyIconWrap}>
+              <Feather name="package" size={48} color={Colors.textMuted} />
+            </View>
+            <Text style={styles.emptyTitle}>No products found</Text>
+            <Text style={styles.emptyText}>
+              {activeTab === 'low' ? 'No low stock alerts' : activeTab === 'out' ? 'All items are in stock' : 'Add products to track inventory'}
+            </Text>
           </View>
         }
       />
@@ -202,8 +263,15 @@ export default function StockScreen() {
           style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
           onPress={() => router.push('/add-product')}
         >
-          <Feather name="plus" size={24} color={Colors.white} />
-          <Text style={styles.fabText}>ADD PRODUCT</Text>
+          <LinearGradient
+            colors={[Colors.primaryGradientStart, Colors.primaryGradientEnd]}
+            style={styles.fabGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Feather name="plus" size={20} color={Colors.white} />
+            <Text style={styles.fabText}>ADD PRODUCT</Text>
+          </LinearGradient>
         </Pressable>
       )}
     </View>
@@ -219,7 +287,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
     backgroundColor: Colors.white,
   },
@@ -228,9 +296,19 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.bold,
     color: Colors.text,
   },
+  headerSubtitle: {
+    fontSize: FontSize.xs,
+    fontFamily: FontFamily.medium,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
   headerBtn: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: BorderRadius.full,
     backgroundColor: Colors.background,
     alignItems: 'center',
@@ -244,39 +322,29 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
+    backgroundColor: Colors.white,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.md,
     alignItems: 'center',
+    ...Shadow.small,
   },
-  statValue: {
-    fontSize: FontSize.xl,
-    fontFamily: FontFamily.bold,
-    color: Colors.primary,
-  },
-  statLabel: {
-    fontSize: FontSize.xs,
-    fontFamily: FontFamily.medium,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  reportButtons: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    gap: Spacing.sm,
-  },
-  reportBtn: {
-    flex: 1,
-    flexDirection: 'row',
+  statIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    gap: Spacing.xs,
+    marginBottom: Spacing.xs,
   },
-  reportBtnText: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.semiBold,
+  statValue: {
+    fontSize: FontSize.lg,
+    fontFamily: FontFamily.bold,
+  },
+  statLabel: {
+    fontSize: FontSize.xxs,
+    fontFamily: FontFamily.medium,
+    color: Colors.textMuted,
+    marginTop: 1,
   },
   tabBar: {
     flexDirection: 'row',
@@ -289,7 +357,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.sm + 2,
     alignItems: 'center',
     borderRadius: BorderRadius.sm,
   },
@@ -297,7 +365,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
   },
   tabText: {
-    fontSize: FontSize.sm,
+    fontSize: FontSize.xs,
     fontFamily: FontFamily.semiBold,
     color: Colors.textSecondary,
   },
@@ -312,8 +380,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
-    height: 44,
-    ...Shadow.small,
+    height: 46,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
   },
   searchIcon: {
     marginRight: Spacing.sm,
@@ -323,7 +392,7 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     fontFamily: FontFamily.regular,
     color: Colors.text,
-    height: 44,
+    height: 46,
   },
   listContent: {
     paddingTop: Spacing.md,
@@ -337,14 +406,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     marginBottom: Spacing.sm,
-    ...Shadow.small,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
   },
   productRowPressed: {
     backgroundColor: Colors.primaryBg,
+    borderColor: Colors.primary + '30',
   },
   productIcon: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -359,50 +430,92 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.semiBold,
     color: Colors.text,
   },
+  productMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+    gap: Spacing.xs,
+  },
+  productCategory: {
+    fontSize: FontSize.xxs,
+    fontFamily: FontFamily.medium,
+    color: Colors.textSecondary,
+  },
+  productDot: {
+    fontSize: FontSize.xxs,
+    color: Colors.textMuted,
+  },
   productUnit: {
-    fontSize: FontSize.xs,
+    fontSize: FontSize.xxs,
     fontFamily: FontFamily.regular,
     color: Colors.textMuted,
-    marginTop: 2,
   },
   stockContainer: {
     alignItems: 'flex-end',
+    minWidth: 50,
   },
   stockQty: {
     fontSize: FontSize.lg,
     fontFamily: FontFamily.bold,
   },
   stockUnit: {
-    fontSize: FontSize.xs,
+    fontSize: FontSize.xxs,
     fontFamily: FontFamily.regular,
     color: Colors.textMuted,
+    marginTop: 1,
+  },
+  stockBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 1,
+    borderRadius: BorderRadius.xs,
+    marginTop: 2,
+  },
+  stockBadgeText: {
+    fontSize: FontSize.xxs,
+    fontFamily: FontFamily.semiBold,
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: Spacing.xxxxl,
-    gap: Spacing.md,
+    paddingVertical: Spacing.jumbo,
+    gap: Spacing.sm,
+  },
+  emptyIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  emptyTitle: {
+    fontSize: FontSize.lg,
+    fontFamily: FontFamily.semiBold,
+    color: Colors.text,
   },
   emptyText: {
-    fontSize: FontSize.md,
-    fontFamily: FontFamily.medium,
+    fontSize: FontSize.sm,
+    fontFamily: FontFamily.regular,
     color: Colors.textMuted,
+    textAlign: 'center',
   },
   fab: {
     position: 'absolute',
-    bottom: 80,
+    bottom: 90,
     right: Spacing.lg,
+    borderRadius: BorderRadius.full,
+    ...Shadow.medium,
+  },
+  fabPressed: {
+    transform: [{ scale: 0.95 }],
+  },
+  fabGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.primary,
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.full,
     gap: Spacing.sm,
-    ...Shadow.medium,
-  },
-  fabPressed: {
-    backgroundColor: Colors.primaryDark,
-    transform: [{ scale: 0.95 }],
   },
   fabText: {
     fontSize: FontSize.sm,

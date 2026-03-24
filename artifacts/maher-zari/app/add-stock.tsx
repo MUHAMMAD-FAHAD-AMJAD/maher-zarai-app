@@ -1,6 +1,7 @@
-import { Feather } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useState, useEffect } from 'react';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,309 +10,325 @@ import {
   Pressable,
   Platform,
   ScrollView,
+  KeyboardAvoidingView,
   Alert,
+  FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 
 import Colors from '@/constants/colors';
-import { FontFamily, FontSize, Spacing, BorderRadius } from '@/constants/theme';
-import { addStockEntry, getProducts, type Product } from '@/database';
+import { FontFamily, FontSize, Spacing, BorderRadius, Shadow } from '@/constants/theme';
+import { addStockEntry, getProduct, searchProducts, type Product } from '@/database';
+
+type StockType = 'in' | 'out';
 
 export default function AddStockScreen() {
-  const { productId, type: stockType } = useLocalSearchParams<{ productId?: string; type?: string }>();
   const insets = useSafeAreaInsets();
-  const isIn = stockType !== 'out';
-  const [products, setProducts] = useState<Product[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState<number | null>(productId ? parseInt(productId) : null);
+  const params = useLocalSearchParams<{ productId?: string; type?: string }>();
+  const [stockType, setStockType] = useState<StockType>((params.type as StockType) || 'in');
   const [quantity, setQuantity] = useState('');
   const [rate, setRate] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productSearch, setProductSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
-    getProducts().then(setProducts);
-  }, []);
-
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const selectedProduct = products.find(p => p.id === selectedProductId);
-
-  const handleSave = async () => {
-    if (!selectedProductId) {
-      Alert.alert('Required', 'Please select a product.');
-      return;
+    if (params.productId) {
+      loadProduct(parseInt(params.productId));
     }
-    const qty = parseFloat(quantity);
-    const r = parseFloat(rate);
-    if (!qty || qty <= 0) {
-      Alert.alert('Invalid', 'Please enter a valid quantity.');
-      return;
-    }
-    if (!r || r <= 0) {
-      Alert.alert('Invalid', 'Please enter a valid rate.');
-      return;
-    }
+  }, [params.productId]);
 
-    setSaving(true);
-    try {
-      await addStockEntry(
-        selectedProductId,
-        isIn ? 'in' : 'out',
-        qty,
-        r,
-        undefined,
-        undefined,
-        notes.trim(),
-      );
-      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.back();
-    } catch (e) {
-      Alert.alert('Error', 'Failed to save stock entry.');
+  const loadProduct = async (id: number) => {
+    const p = await getProduct(id);
+    if (p) {
+      setSelectedProduct(p);
+      setRate(p.purchase_price?.toString() || '');
     }
-    setSaving(false);
+  };
+
+  const handleSearch = async (query: string) => {
+    setProductSearch(query);
+    if (query.length >= 1) {
+      const results = await searchProducts(query);
+      setSearchResults(results);
+      setShowSearch(true);
+    } else {
+      setSearchResults([]);
+      setShowSearch(false);
+    }
+  };
+
+  const selectProduct = (product: Product) => {
+    setSelectedProduct(product);
+    setProductSearch('');
+    setShowSearch(false);
+    if (stockType === 'in') {
+      setRate(product.purchase_price?.toString() || '');
+    } else {
+      setRate(product.sale_price?.toString() || '');
+    }
   };
 
   const totalAmount = (parseFloat(quantity) || 0) * (parseFloat(rate) || 0);
 
+  const handleSave = async () => {
+    if (!selectedProduct) {
+      Alert.alert('Required', 'Please select a product');
+      return;
+    }
+    const qty = parseFloat(quantity);
+    if (!qty || qty <= 0) {
+      Alert.alert('Required', 'Please enter quantity');
+      return;
+    }
+    if (stockType === 'out' && qty > selectedProduct.stock_quantity) {
+      Alert.alert('Insufficient Stock', `Only ${selectedProduct.stock_quantity} ${selectedProduct.unit} available`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await addStockEntry(
+        selectedProduct.id,
+        stockType,
+        qty,
+        parseFloat(rate) || 0,
+        undefined,
+        undefined,
+        notes.trim() || undefined,
+      );
+      router.back();
+    } catch (e) {
+      Alert.alert('Error', 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isIn = stockType === 'in';
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === 'web' ? 67 : 0) }]}>
-      <View style={[styles.headerBar, { backgroundColor: isIn ? Colors.green : Colors.red }]}>
-        <Pressable
-          style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}
-          onPress={() => router.back()}
-        >
-          <Feather name="x" size={22} color={Colors.white} />
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.header}>
+        <Pressable style={styles.backBtn} onPress={() => router.back()}>
+          <Feather name="arrow-left" size={22} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Stock {isIn ? 'IN' : 'OUT'}</Text>
+        <Text style={styles.headerTitle}>{isIn ? 'Stock In' : 'Stock Out'}</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <View style={styles.typeToggle}>
+            <Pressable
+              style={[styles.typeBtn, isIn && { backgroundColor: Colors.green }]}
+              onPress={() => setStockType('in')}
+            >
+              <Feather name="arrow-down-circle" size={16} color={isIn ? Colors.white : Colors.textSecondary} />
+              <Text style={[styles.typeBtnText, isIn && { color: Colors.white }]}>Stock In</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.typeBtn, !isIn && { backgroundColor: Colors.red }]}
+              onPress={() => setStockType('out')}
+            >
+              <Feather name="arrow-up-circle" size={16} color={!isIn ? Colors.white : Colors.textSecondary} />
+              <Text style={[styles.typeBtnText, !isIn && { color: Colors.white }]}>Stock Out</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Product *</Text>
+            {selectedProduct ? (
+              <View style={styles.selectedProduct}>
+                <View style={[styles.prodIcon, { backgroundColor: Colors.primaryBg }]}>
+                  <Feather name="package" size={16} color={Colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.prodName}>{selectedProduct.name}</Text>
+                  <Text style={styles.prodStock}>
+                    Current Stock: {selectedProduct.stock_quantity} {selectedProduct.unit}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setSelectedProduct(null)}>
+                  <Feather name="x-circle" size={20} color={Colors.textMuted} />
+                </Pressable>
+              </View>
+            ) : (
+              <View>
+                <View style={styles.inputRow}>
+                  <Feather name="search" size={18} color={Colors.textMuted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Search product..."
+                    placeholderTextColor={Colors.textMuted}
+                    value={productSearch}
+                    onChangeText={handleSearch}
+                  />
+                </View>
+                {showSearch && searchResults.length > 0 && (
+                  <View style={styles.searchDropdown}>
+                    {searchResults.slice(0, 5).map(p => (
+                      <Pressable
+                        key={p.id}
+                        style={styles.searchItem}
+                        onPress={() => selectProduct(p)}
+                      >
+                        <Text style={styles.searchItemName}>{p.name}</Text>
+                        <Text style={styles.searchItemStock}>{p.stock_quantity} {p.unit}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.row}>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.label}>Quantity *</Text>
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  value={quantity}
+                  onChangeText={setQuantity}
+                  keyboardType="numeric"
+                />
+                <Text style={styles.unitLabel}>{selectedProduct?.unit || 'units'}</Text>
+              </View>
+            </View>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.label}>Rate (Rs)</Text>
+              <View style={styles.inputRow}>
+                <Text style={styles.rsPrefix}>Rs</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  value={rate}
+                  onChangeText={setRate}
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          </View>
+
+          {totalAmount > 0 && (
+            <View style={[styles.totalCard, { borderLeftColor: isIn ? Colors.green : Colors.red }]}>
+              <Text style={styles.totalLabel}>Total Amount</Text>
+              <Text style={[styles.totalAmount, { color: isIn ? Colors.green : Colors.red }]}>
+                Rs {totalAmount.toLocaleString('en-PK')}
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Notes (optional)</Text>
+            <View style={[styles.inputRow, { height: 80, alignItems: 'flex-start', paddingTop: Spacing.md }]}>
+              <Feather name="edit-3" size={18} color={Colors.textMuted} style={{ marginTop: 2 }} />
+              <TextInput
+                style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
+                placeholder="Add any notes..."
+                placeholderTextColor={Colors.textMuted}
+                value={notes}
+                onChangeText={setNotes}
+                multiline
+              />
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.md }]}>
         <Pressable
-          style={({ pressed }) => [styles.saveHeaderBtn, pressed && { opacity: 0.8 }, saving && { opacity: 0.5 }]}
+          style={({ pressed }) => [styles.saveBtn, pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] }]}
           onPress={handleSave}
           disabled={saving}
         >
-          <Text style={styles.saveHeaderText}>{saving ? 'Saving...' : 'Save'}</Text>
+          <LinearGradient
+            colors={isIn
+              ? [Colors.successGradientStart, Colors.successGradientEnd]
+              : [Colors.dangerGradientStart, Colors.dangerGradientEnd]}
+            style={styles.saveBtnGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <Feather name={isIn ? 'arrow-down-circle' : 'arrow-up-circle'} size={20} color={Colors.white} />
+            <Text style={styles.saveBtnText}>
+              {saving ? 'SAVING...' : isIn ? 'ADD STOCK' : 'REMOVE STOCK'}
+            </Text>
+          </LinearGradient>
         </Pressable>
       </View>
-
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {!selectedProduct ? (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Select Product *</Text>
-            <TextInput
-              style={styles.input}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Search products..."
-              placeholderTextColor={Colors.textMuted}
-            />
-            <View style={styles.productList}>
-              {filteredProducts.slice(0, 10).map(p => (
-                <Pressable
-                  key={p.id}
-                  style={({ pressed }) => [styles.productItem, pressed && { backgroundColor: Colors.primaryBg }]}
-                  onPress={() => {
-                    setSelectedProductId(p.id);
-                    setSearchQuery('');
-                  }}
-                >
-                  <Text style={styles.productItemName}>{p.name}</Text>
-                  <Text style={styles.productItemStock}>Stock: {p.stock_quantity} {p.unit}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        ) : (
-          <View style={styles.selectedProductCard}>
-            <View style={styles.selectedProductInfo}>
-              <Text style={styles.selectedProductName}>{selectedProduct.name}</Text>
-              <Text style={styles.selectedProductStock}>Current Stock: {selectedProduct.stock_quantity} {selectedProduct.unit}</Text>
-            </View>
-            <Pressable onPress={() => setSelectedProductId(null)}>
-              <Feather name="x" size={18} color={Colors.textMuted} />
-            </Pressable>
-          </View>
-        )}
-
-        <View style={styles.row}>
-          <View style={[styles.inputGroup, { flex: 1 }]}>
-            <Text style={styles.label}>Quantity</Text>
-            <TextInput
-              style={styles.input}
-              value={quantity}
-              onChangeText={setQuantity}
-              placeholder="0"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="numeric"
-            />
-          </View>
-          <View style={{ width: Spacing.md }} />
-          <View style={[styles.inputGroup, { flex: 1 }]}>
-            <Text style={styles.label}>Rate (Rs per unit)</Text>
-            <TextInput
-              style={styles.input}
-              value={rate}
-              onChangeText={setRate}
-              placeholder="0"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="numeric"
-            />
-          </View>
-        </View>
-
-        {totalAmount > 0 && (
-          <View style={styles.totalCard}>
-            <Text style={styles.totalLabel}>Total Amount</Text>
-            <Text style={[styles.totalValue, { color: isIn ? Colors.green : Colors.red }]}>
-              Rs {totalAmount.toLocaleString('en-PK')}
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Notes (optional)</Text>
-          <TextInput
-            style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]}
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="e.g. Supplier name, details..."
-            placeholderTextColor={Colors.textMuted}
-            multiline
-          />
-        </View>
-      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.white,
+  container: { flex: 1, backgroundColor: Colors.background },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, backgroundColor: Colors.white,
+    borderBottomWidth: 1, borderBottomColor: Colors.borderLight,
   },
-  headerBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.lg,
+  backBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: FontSize.lg, fontFamily: FontFamily.bold, color: Colors.text },
+  content: { padding: Spacing.xl, gap: Spacing.xl, paddingBottom: 40 },
+  typeToggle: {
+    flexDirection: 'row', backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    padding: 3, ...Shadow.small,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  typeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: BorderRadius.sm,
   },
-  headerTitle: {
-    flex: 1,
-    fontSize: FontSize.xl,
-    fontFamily: FontFamily.bold,
-    color: Colors.white,
+  typeBtnText: { fontSize: FontSize.md, fontFamily: FontFamily.semiBold, color: Colors.textSecondary },
+  inputGroup: { gap: Spacing.sm },
+  label: { fontSize: FontSize.sm, fontFamily: FontFamily.semiBold, color: Colors.text, marginLeft: Spacing.xs },
+  inputRow: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white,
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.lg, height: 52,
+    borderWidth: 1, borderColor: Colors.borderLight, gap: Spacing.md,
   },
-  saveHeaderBtn: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
+  rsPrefix: { fontSize: FontSize.md, fontFamily: FontFamily.bold, color: Colors.primary },
+  input: { flex: 1, fontSize: FontSize.md, fontFamily: FontFamily.regular, color: Colors.text, height: 52 },
+  unitLabel: { fontSize: FontSize.sm, fontFamily: FontFamily.medium, color: Colors.textMuted },
+  selectedProduct: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white,
+    borderRadius: BorderRadius.md, padding: Spacing.lg, gap: Spacing.md,
+    borderWidth: 1, borderColor: Colors.primary + '30',
   },
-  saveHeaderText: {
-    fontSize: FontSize.md,
-    fontFamily: FontFamily.semiBold,
-    color: Colors.white,
+  prodIcon: { width: 36, height: 36, borderRadius: BorderRadius.sm, alignItems: 'center', justifyContent: 'center' },
+  prodName: { fontSize: FontSize.md, fontFamily: FontFamily.semiBold, color: Colors.text },
+  prodStock: { fontSize: FontSize.xs, fontFamily: FontFamily.regular, color: Colors.textSecondary, marginTop: 2 },
+  searchDropdown: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    marginTop: Spacing.xs, ...Shadow.medium, overflow: 'hidden',
   },
-  scrollContent: {
-    padding: Spacing.xl,
-    paddingBottom: 100,
+  searchItem: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.borderLight,
   },
-  inputGroup: {
-    marginBottom: Spacing.xl,
-  },
-  label: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.semiBold,
-    color: Colors.text,
-    marginBottom: Spacing.sm,
-  },
-  input: {
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    fontSize: FontSize.md,
-    fontFamily: FontFamily.regular,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  productList: {
-    marginTop: Spacing.sm,
-  },
-  productItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    borderBottomWidth: 0.5,
-    borderBottomColor: Colors.divider,
-  },
-  productItemName: {
-    fontSize: FontSize.md,
-    fontFamily: FontFamily.medium,
-    color: Colors.text,
-    flex: 1,
-  },
-  productItemStock: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.regular,
-    color: Colors.textMuted,
-  },
-  selectedProductCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.primaryBg,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.lg,
-    marginBottom: Spacing.xl,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-  },
-  selectedProductInfo: {
-    flex: 1,
-  },
-  selectedProductName: {
-    fontSize: FontSize.md,
-    fontFamily: FontFamily.semiBold,
-    color: Colors.text,
-  },
-  selectedProductStock: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.regular,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  row: {
-    flexDirection: 'row',
-  },
+  searchItemName: { fontSize: FontSize.md, fontFamily: FontFamily.medium, color: Colors.text },
+  searchItemStock: { fontSize: FontSize.sm, fontFamily: FontFamily.regular, color: Colors.textMuted },
+  row: { flexDirection: 'row', gap: Spacing.md },
   totalCard: {
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
-    marginBottom: Spacing.xl,
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    padding: Spacing.lg, borderLeftWidth: 3, flexDirection: 'row',
+    justifyContent: 'space-between', alignItems: 'center', ...Shadow.small,
   },
-  totalLabel: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.medium,
-    color: Colors.textSecondary,
+  totalLabel: { fontSize: FontSize.sm, fontFamily: FontFamily.medium, color: Colors.textSecondary },
+  totalAmount: { fontSize: FontSize.xl, fontFamily: FontFamily.bold },
+  footer: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.md, backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.borderLight },
+  saveBtn: { borderRadius: BorderRadius.md, ...Shadow.medium },
+  saveBtnGradient: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: Spacing.lg, borderRadius: BorderRadius.md, gap: Spacing.sm,
   },
-  totalValue: {
-    fontSize: FontSize.xxxl,
-    fontFamily: FontFamily.bold,
-    marginTop: Spacing.xs,
-  },
+  saveBtnText: { fontSize: FontSize.md, fontFamily: FontFamily.bold, color: Colors.white },
 });

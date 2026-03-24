@@ -32,6 +32,10 @@ function RootLayoutNav() {
       <Stack.Screen name="add-transaction" options={{ headerShown: false }} />
       <Stack.Screen name="add-product" options={{ headerShown: false }} />
       <Stack.Screen name="add-stock" options={{ headerShown: false }} />
+      <Stack.Screen name="create-bill" options={{ headerShown: false }} />
+      <Stack.Screen name="bill/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="scan-review" options={{ headerShown: false }} />
+      <Stack.Screen name="recycle-bin" options={{ headerShown: false }} />
     </Stack>
   );
 }

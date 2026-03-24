@@ -1,4 +1,5 @@
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import React, { useState, useCallback } from 'react';
 import {
@@ -9,16 +10,51 @@ import {
   Pressable,
   Platform,
   Alert,
-  Linking,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 
 import Colors from '@/constants/colors';
 import { FontFamily, FontSize, Spacing, BorderRadius, Shadow } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCustomer, getTransactions, softDeleteCustomer, type Customer, type Transaction } from '@/database';
+
+const AVATAR_COLORS = [
+  '#FF6B35', '#E53935', '#2E7D32', '#3B82F6',
+  '#8B5CF6', '#EC4899', '#F59E0B', '#06B6D4',
+];
+
+function getAvatarColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+}
+
+function formatAmount(amount: number): string {
+  return `Rs ${Math.abs(amount).toLocaleString('en-PK')}`;
+}
+
+function formatDate(dateStr: string): string {
+  try {
+    const date = new Date(dateStr);
+    const day = date.getDate().toString().padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  } catch {
+    return dateStr;
+  }
+}
 
 export default function CustomerProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -28,6 +64,7 @@ export default function CustomerProfileScreen() {
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -39,6 +76,8 @@ export default function CustomerProfileScreen() {
       setTransactions(txns);
     } catch (e) {
       console.error('Error loading customer:', e);
+    } finally {
+      setLoading(false);
     }
   }, [id]);
 
@@ -54,20 +93,10 @@ export default function CustomerProfileScreen() {
     setRefreshing(false);
   }, [loadData]);
 
-  const handleWhatsApp = () => {
-    if (!customer?.phone) {
-      Alert.alert('No Phone Number', 'This customer does not have a phone number saved.');
-      return;
-    }
-    const phone = customer.phone.startsWith('92') ? customer.phone : `92${customer.phone}`;
-    const message = `Assalam o Alaikum! Your current balance at Maher Zarai Markaz is Rs ${Math.abs(customer.current_balance).toLocaleString('en-PK')}. Thank you.`;
-    Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`);
-  };
-
   const handleDelete = () => {
     Alert.alert(
       'Delete Customer',
-      `Are you sure you want to delete "${customer?.name}"? You can recover from Recycle Bin.`,
+      `Are you sure you want to delete "${customer?.name}"? This action can be undone from Recycle Bin.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -76,7 +105,6 @@ export default function CustomerProfileScreen() {
           onPress: async () => {
             if (customer) {
               await softDeleteCustomer(customer.id);
-              if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               router.back();
             }
           },
@@ -85,29 +113,26 @@ export default function CustomerProfileScreen() {
     );
   };
 
-  const formatAmount = (amount: number) => `Rs ${Math.abs(amount).toLocaleString('en-PK')}`;
-  const formatDate = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: '2-digit' });
-    } catch {
-      return dateStr;
-    }
-  };
-  const formatTime = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '';
-    }
-  };
+  if (loading) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading customer...</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!customer) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Feather name="user-x" size={48} color={Colors.textMuted} />
+          <Text style={styles.loadingText}>Customer not found</Text>
+          <Pressable onPress={() => router.back()} style={styles.goBackBtn}>
+            <Text style={styles.goBackText}>Go Back</Text>
+          </Pressable>
         </View>
       </View>
     );
@@ -115,139 +140,151 @@ export default function CustomerProfileScreen() {
 
   const balance = customer.current_balance;
   const isOwed = balance > 0;
+  const isSettled = balance === 0;
+  const balanceLabel = isSettled ? 'Settled' : isOwed ? 'You Will Get' : 'You Will Give';
+  const balanceColor = isSettled ? Colors.textMuted : isOwed ? '#FBBF24' : '#86EFAC';
+  const avatarColor = getAvatarColor(customer.name);
+  const initials = getInitials(customer.name);
 
-  const renderTransaction = ({ item }: { item: Transaction }) => (
-    <View style={styles.txnRow}>
-      <View style={styles.txnDateCol}>
-        <Text style={styles.txnDate}>{formatDate(item.date)}</Text>
-        <Text style={styles.txnTime}>{formatTime(item.date)}</Text>
-      </View>
-      <View style={styles.txnMidCol}>
-        <Text style={styles.txnDesc} numberOfLines={1}>
-          {item.description || (item.type === 'credit' ? 'Credit Sale' : 'Payment Received')}
-        </Text>
-        <View style={[
-          styles.txnBadge,
-          { backgroundColor: item.type === 'payment' ? Colors.greenBg : Colors.redBg }
-        ]}>
-          <Text style={[
-            styles.txnBadgeText,
-            { color: item.type === 'payment' ? Colors.green : Colors.red }
-          ]}>
-            {item.type === 'payment' ? 'Cash In' : 'You Gave'}
-          </Text>
+  const renderTransaction = ({ item }: { item: Transaction }) => {
+    const isCredit = item.type === 'credit';
+    return (
+      <View style={styles.txnCard}>
+        <View style={[styles.txnIcon, { backgroundColor: isCredit ? Colors.redBg : Colors.greenBg }]}>
+          <Feather
+            name={isCredit ? 'arrow-up' : 'arrow-down'}
+            size={18}
+            color={isCredit ? Colors.red : Colors.green}
+          />
         </View>
+        <View style={styles.txnContent}>
+          <Text style={styles.txnDesc} numberOfLines={1}>
+            {item.description || (isCredit ? 'Credit Added' : 'Payment Received')}
+          </Text>
+          <Text style={styles.txnDate}>{formatDate(item.date)}</Text>
+        </View>
+        <Text style={[styles.txnAmount, { color: isCredit ? Colors.red : Colors.green }]}>
+          {formatAmount(item.amount)}
+        </Text>
       </View>
-      <Text style={[
-        styles.txnAmount,
-        { color: item.type === 'payment' ? Colors.green : Colors.red }
-      ]}>
-        {formatAmount(item.amount)}
-      </Text>
-    </View>
+    );
+  };
+
+  const ListHeader = () => (
+    <>
+      <LinearGradient
+        colors={[Colors.headerGradientStart, Colors.headerGradientEnd]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.headerGradient, { paddingTop: insets.top + Spacing.md }]}
+      >
+        <View style={styles.headerTopRow}>
+          <Pressable
+            style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}
+            onPress={() => router.back()}
+          >
+            <Feather name="arrow-left" size={22} color={Colors.white} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Profile</Text>
+          <View style={styles.backBtn} />
+        </View>
+
+        <View style={styles.avatarSection}>
+          <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+          <Text style={styles.customerName}>{customer.name}</Text>
+          {customer.phone ? (
+            <Text style={styles.customerPhone}>{customer.phone}</Text>
+          ) : null}
+          <View style={styles.typeBadge}>
+            <Text style={styles.typeBadgeText}>
+              {customer.type === 'supplier' ? 'Supplier' : 'Customer'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.balanceSection}>
+          <Text style={[styles.balanceLabel, { color: balanceColor }]}>{balanceLabel}</Text>
+          <Text style={styles.balanceAmount}>{formatAmount(balance)}</Text>
+        </View>
+      </LinearGradient>
+
+      <View style={styles.actionsContainer}>
+        <Pressable
+          style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.8 }]}
+          onPress={() => router.push({ pathname: '/add-transaction', params: { customerId: id, type: 'credit' } })}
+        >
+          <View style={[styles.actionIconWrap, { backgroundColor: Colors.primaryBg }]}>
+            <Feather name="plus-circle" size={20} color={Colors.primary} />
+          </View>
+          <Text style={styles.actionLabel}>Add Credit</Text>
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.8 }]}
+          onPress={() => router.push({ pathname: '/add-transaction', params: { customerId: id, type: 'payment' } })}
+        >
+          <View style={[styles.actionIconWrap, { backgroundColor: Colors.greenBg }]}>
+            <Feather name="arrow-down" size={20} color={Colors.green} />
+          </View>
+          <Text style={styles.actionLabel}>Add Payment</Text>
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.8 }]}
+          onPress={() => Alert.alert('Edit', 'Edit functionality coming soon.')}
+        >
+          <View style={[styles.actionIconWrap, { backgroundColor: Colors.infoBg }]}>
+            <Feather name="edit" size={20} color={Colors.info} />
+          </View>
+          <Text style={styles.actionLabel}>Edit</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Transaction History</Text>
+        <Text style={styles.sectionCount}>{transactions.length} entries</Text>
+      </View>
+    </>
   );
 
+  const ListFooter = () => {
+    if (!isAdmin) return null;
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.deleteButton, pressed && { opacity: 0.8 }]}
+        onPress={handleDelete}
+      >
+        <Feather name="trash-2" size={18} color={Colors.red} />
+        <Text style={styles.deleteButtonText}>Delete Customer</Text>
+      </Pressable>
+    );
+  };
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top + (Platform.OS === 'web' ? 67 : 0) }]}>
-      <View style={styles.headerBar}>
-        <Pressable
-          style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.7 }]}
-          onPress={() => router.back()}
-        >
-          <Feather name="arrow-left" size={22} color={Colors.text} />
-        </Pressable>
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerName} numberOfLines={1}>{customer.name}</Text>
-          <Text style={styles.headerType}>
-            {customer.type === 'supplier' ? 'Supplier' : 'Customer'}
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          {customer.phone ? (
-            <Pressable style={styles.headerActionBtn} onPress={handleWhatsApp}>
-              <MaterialCommunityIcons name="whatsapp" size={22} color={Colors.green} />
-            </Pressable>
-          ) : null}
-          {isAdmin && (
-            <Pressable style={styles.headerActionBtn} onPress={handleDelete}>
-              <Feather name="trash-2" size={18} color={Colors.red} />
-            </Pressable>
-          )}
-        </View>
-      </View>
-
-      <View style={styles.balanceCard}>
-        <Text style={styles.balanceLabel}>
-          {isOwed ? 'You Will Get' : balance < 0 ? 'You Will Give' : 'Balance'}
-        </Text>
-        <Text style={[styles.balanceValue, {
-          color: isOwed ? Colors.red : balance < 0 ? Colors.green : Colors.textMuted
-        }]}>
-          {formatAmount(balance)}
-        </Text>
-        {customer.phone ? (
-          <Text style={styles.phoneText}>{customer.phone}</Text>
-        ) : null}
-      </View>
-
-      <View style={styles.actionRow}>
-        <Pressable style={styles.actionBtn} onPress={() => {}}>
-          <Feather name="bar-chart-2" size={18} color={Colors.primary} />
-          <Text style={styles.actionBtnText}>Report</Text>
-        </Pressable>
-        <Pressable style={styles.actionBtn} onPress={handleWhatsApp}>
-          <MaterialCommunityIcons name="whatsapp" size={18} color={Colors.green} />
-          <Text style={styles.actionBtnText}>WhatsApp</Text>
-        </Pressable>
-        <Pressable style={styles.actionBtn} onPress={() => {}}>
-          <Feather name="clock" size={18} color={Colors.warning} />
-          <Text style={styles.actionBtnText}>History</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.txnHeader}>
-        <Text style={styles.txnHeaderText}>Transactions</Text>
-        <Text style={styles.txnCount}>{transactions.length} entries</Text>
-      </View>
-
+    <View style={styles.container}>
       <FlatList
         data={transactions}
         keyExtractor={item => item.id.toString()}
         renderItem={renderTransaction}
-        contentContainerStyle={[styles.txnList, { paddingBottom: 120 }]}
+        ListHeaderComponent={ListHeader}
+        ListFooterComponent={ListFooter}
+        contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xxl }}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.white} />
         }
         ListEmptyComponent={
-          <View style={styles.emptyTxn}>
-            <Feather name="inbox" size={40} color={Colors.textMuted} />
-            <Text style={styles.emptyTxnText}>No transactions yet</Text>
-            <Text style={styles.emptyTxnSub}>
+          <View style={styles.emptyState}>
+            <Feather name="inbox" size={48} color={Colors.textMuted} />
+            <Text style={styles.emptyTitle}>No transactions yet</Text>
+            <Text style={styles.emptySub}>
               Opening balance: {formatAmount(customer.opening_balance)}
             </Text>
           </View>
         }
       />
-
-      {isAdmin && (
-        <View style={[styles.bottomButtons, { paddingBottom: insets.bottom + (Platform.OS === 'web' ? 34 : 16) }]}>
-          <Pressable
-            style={({ pressed }) => [styles.gaveBtn, pressed && { opacity: 0.9 }]}
-            onPress={() => router.push({ pathname: '/add-transaction', params: { customerId: id, type: 'credit' } })}
-          >
-            <Feather name="arrow-up-right" size={18} color={Colors.white} />
-            <Text style={styles.bottomBtnText}>YOU GAVE Rs</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.gotBtn, pressed && { opacity: 0.9 }]}
-            onPress={() => router.push({ pathname: '/add-transaction', params: { customerId: id, type: 'payment' } })}
-          >
-            <Feather name="arrow-down-left" size={18} color={Colors.white} />
-            <Text style={styles.bottomBtnText}>YOU GOT Rs</Text>
-          </Pressable>
-        </View>
-      )}
     </View>
   );
 }
@@ -261,221 +298,223 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.md,
   },
   loadingText: {
     fontSize: FontSize.md,
     fontFamily: FontFamily.medium,
     color: Colors.textMuted,
   },
-  headerBar: {
+  goBackBtn: {
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.md,
+  },
+  goBackText: {
+    fontSize: FontSize.md,
+    fontFamily: FontFamily.semiBold,
+    color: Colors.white,
+  },
+  headerGradient: {
+    paddingBottom: Spacing.xxxl,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: FontSize.lg,
+    fontFamily: FontFamily.semiBold,
+    color: Colors.white,
+  },
+  avatarSection: {
+    alignItems: 'center',
+    marginBottom: Spacing.xl,
+  },
+  avatar: {
+    width: 80,
+    height: 80,
+    borderRadius: BorderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.4)',
+    marginBottom: Spacing.md,
+  },
+  avatarText: {
+    fontSize: FontSize.xxl,
+    fontFamily: FontFamily.bold,
+    color: Colors.white,
+  },
+  customerName: {
+    fontSize: FontSize.xxl,
+    fontFamily: FontFamily.bold,
+    color: Colors.white,
+    textAlign: 'center',
+  },
+  customerPhone: {
+    fontSize: FontSize.md,
+    fontFamily: FontFamily.regular,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: Spacing.xxs,
+  },
+  typeBadge: {
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xs,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: BorderRadius.full,
+  },
+  typeBadgeText: {
+    fontSize: FontSize.xs,
+    fontFamily: FontFamily.semiBold,
+    color: Colors.white,
+  },
+  balanceSection: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    marginHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+  },
+  balanceLabel: {
+    fontSize: FontSize.sm,
+    fontFamily: FontFamily.semiBold,
+    marginBottom: Spacing.xxs,
+  },
+  balanceAmount: {
+    fontSize: FontSize.xxxl,
+    fontFamily: FontFamily.bold,
+    color: Colors.white,
+  },
+  actionsContainer: {
+    flexDirection: 'row',
+    marginHorizontal: Spacing.lg,
+    marginTop: -Spacing.xl,
+    gap: Spacing.sm,
+  },
+  actionButton: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.lg,
+    gap: Spacing.sm,
+    ...Shadow.medium,
+  },
+  actionIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionLabel: {
+    fontSize: FontSize.xs,
+    fontFamily: FontFamily.semiBold,
+    color: Colors.text,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.xxl,
+    marginBottom: Spacing.md,
+  },
+  sectionTitle: {
+    fontSize: FontSize.lg,
+    fontFamily: FontFamily.bold,
+    color: Colors.text,
+  },
+  sectionCount: {
+    fontSize: FontSize.sm,
+    fontFamily: FontFamily.regular,
+    color: Colors.textMuted,
+  },
+  txnCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 0.5,
-    borderBottomColor: Colors.border,
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    ...Shadow.small,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
+  txnIcon: {
+    width: 40,
+    height: 40,
     borderRadius: BorderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: Spacing.md,
   },
-  headerInfo: {
+  txnContent: {
     flex: 1,
   },
-  headerName: {
-    fontSize: FontSize.lg,
-    fontFamily: FontFamily.bold,
-    color: Colors.text,
-  },
-  headerType: {
-    fontSize: FontSize.xs,
+  txnDesc: {
+    fontSize: FontSize.md,
     fontFamily: FontFamily.medium,
-    color: Colors.primary,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  headerActionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  balanceCard: {
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xl,
-    alignItems: 'center',
-    ...Shadow.medium,
-  },
-  balanceLabel: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.medium,
-    color: Colors.textSecondary,
-  },
-  balanceValue: {
-    fontSize: FontSize.display,
-    fontFamily: FontFamily.bold,
-    marginTop: Spacing.xs,
-  },
-  phoneText: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.regular,
-    color: Colors.textMuted,
-    marginTop: Spacing.sm,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md,
-    gap: Spacing.sm,
-  },
-  actionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.white,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    gap: Spacing.xs,
-    ...Shadow.small,
-  },
-  actionBtnText: {
-    fontSize: FontSize.xs,
-    fontFamily: FontFamily.semiBold,
     color: Colors.text,
-  },
-  txnHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.xl,
-    marginBottom: Spacing.sm,
-  },
-  txnHeaderText: {
-    fontSize: FontSize.lg,
-    fontFamily: FontFamily.bold,
-    color: Colors.text,
-  },
-  txnCount: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.regular,
-    color: Colors.textMuted,
-  },
-  txnList: {
-    paddingHorizontal: Spacing.lg,
-  },
-  txnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    marginBottom: Spacing.sm,
-    ...Shadow.small,
-  },
-  txnDateCol: {
-    width: 60,
   },
   txnDate: {
     fontSize: FontSize.xs,
-    fontFamily: FontFamily.semiBold,
-    color: Colors.text,
-  },
-  txnTime: {
-    fontSize: 10,
     fontFamily: FontFamily.regular,
     color: Colors.textMuted,
-  },
-  txnMidCol: {
-    flex: 1,
-    marginHorizontal: Spacing.sm,
-  },
-  txnDesc: {
-    fontSize: FontSize.sm,
-    fontFamily: FontFamily.medium,
-    color: Colors.text,
-  },
-  txnBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.sm,
-    marginTop: 3,
-  },
-  txnBadgeText: {
-    fontSize: 10,
-    fontFamily: FontFamily.semiBold,
+    marginTop: Spacing.xxs,
   },
   txnAmount: {
     fontSize: FontSize.md,
     fontFamily: FontFamily.bold,
+    marginLeft: Spacing.sm,
   },
-  emptyTxn: {
+  emptyState: {
     alignItems: 'center',
     paddingVertical: Spacing.xxxxl,
     gap: Spacing.md,
   },
-  emptyTxnText: {
-    fontSize: FontSize.md,
-    fontFamily: FontFamily.medium,
+  emptyTitle: {
+    fontSize: FontSize.lg,
+    fontFamily: FontFamily.semiBold,
     color: Colors.textMuted,
   },
-  emptyTxnSub: {
+  emptySub: {
     fontSize: FontSize.sm,
     fontFamily: FontFamily.regular,
     color: Colors.textMuted,
   },
-  bottomButtons: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    padding: Spacing.lg,
-    gap: Spacing.md,
-    backgroundColor: Colors.white,
-    borderTopWidth: 0.5,
-    borderTopColor: Colors.border,
-  },
-  gaveBtn: {
-    flex: 1,
+  deleteButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.red,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.xxl,
+    marginBottom: Spacing.lg,
     paddingVertical: Spacing.lg,
+    backgroundColor: Colors.redBg,
     borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.red,
     gap: Spacing.sm,
-    ...Shadow.small,
   },
-  gotBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.green,
-    paddingVertical: Spacing.lg,
-    borderRadius: BorderRadius.lg,
-    gap: Spacing.sm,
-    ...Shadow.small,
-  },
-  bottomBtnText: {
+  deleteButtonText: {
     fontSize: FontSize.md,
-    fontFamily: FontFamily.bold,
-    color: Colors.white,
+    fontFamily: FontFamily.semiBold,
+    color: Colors.red,
   },
 });

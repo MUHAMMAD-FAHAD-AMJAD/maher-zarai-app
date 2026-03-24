@@ -44,6 +44,13 @@ let webProducts: Product[] = SEED_PRODUCTS.map((p, i) => ({
 
 let webTransactions: Transaction[] = [];
 let webNextTxnId = 1;
+let webBills: Bill[] = [];
+let webBillItems: BillItem[] = [];
+let webNextBillId = 1;
+let webNextBillItemId = 1;
+let webNextBillNumber = 1;
+let webStockEntries: StockEntry[] = [];
+let webNextStockId = 1;
 
 export async function getDatabase(): Promise<any> {
   if (isWeb) return null;
@@ -217,6 +224,17 @@ export type Bill = {
   is_deleted: number;
 };
 
+export type BillItem = {
+  id: number;
+  bill_id: number;
+  product_id: number;
+  quantity: number;
+  price: number;
+  total: number;
+  product_name?: string;
+  product_unit?: string;
+};
+
 export async function getCustomers(type?: string, includeDeleted = false): Promise<Customer[]> {
   if (isWeb) {
     return webCustomers.filter(c => {
@@ -241,6 +259,17 @@ export async function getCustomers(type?: string, includeDeleted = false): Promi
   query += ' ORDER BY name ASC';
 
   return database.getAllAsync<Customer>(query, params);
+}
+
+export async function getDeletedCustomers(): Promise<Customer[]> {
+  if (isWeb) {
+    return webCustomers.filter(c => c.is_deleted === 1);
+  }
+  const database = await getDatabase();
+  if (!database) return [];
+  return database.getAllAsync<Customer>(
+    'SELECT * FROM customers WHERE is_deleted = 1 ORDER BY deleted_at DESC'
+  );
 }
 
 export async function getCustomer(id: number): Promise<Customer | null> {
@@ -300,7 +329,7 @@ export async function updateCustomer(
 export async function softDeleteCustomer(id: number): Promise<void> {
   if (isWeb) {
     const c = webCustomers.find(c => c.id === id);
-    if (c) { c.is_deleted = 1; }
+    if (c) { c.is_deleted = 1; c.deleted_at = new Date().toISOString(); }
     return;
   }
   const database = await getDatabase();
@@ -314,7 +343,7 @@ export async function softDeleteCustomer(id: number): Promise<void> {
 export async function restoreCustomer(id: number): Promise<void> {
   if (isWeb) {
     const c = webCustomers.find(c => c.id === id);
-    if (c) { c.is_deleted = 0; }
+    if (c) { c.is_deleted = 0; c.deleted_at = null; }
     return;
   }
   const database = await getDatabase();
@@ -354,9 +383,19 @@ export async function getProducts(includeDeleted = false): Promise<Product[]> {
   return database.getAllAsync<Product>(query);
 }
 
+export async function getProduct(id: number): Promise<Product | null> {
+  if (isWeb) return webProducts.find(p => p.id === id) || null;
+  const database = await getDatabase();
+  if (!database) return null;
+  return database.getFirstAsync<Product>(
+    'SELECT * FROM products WHERE id = ?',
+    [id]
+  );
+}
+
 export async function getLowStockProducts(): Promise<Product[]> {
   if (isWeb) {
-    return webProducts.filter(p => !p.is_deleted && p.stock_quantity <= p.low_stock_threshold && p.stock_quantity > 0);
+    return webProducts.filter(p => !p.is_deleted && p.stock_quantity <= p.low_stock_threshold && p.stock_quantity >= 0);
   }
   const database = await getDatabase();
   if (!database) return [];
@@ -390,6 +429,46 @@ export async function addProduct(
     [name, unit, stockQuantity, purchasePrice, salePrice, category]
   );
   return result.lastInsertRowId;
+}
+
+export async function updateProduct(
+  id: number,
+  name: string,
+  unit: string,
+  purchasePrice: number,
+  salePrice: number,
+  category: string,
+  lowStockThreshold: number
+): Promise<void> {
+  if (isWeb) {
+    const p = webProducts.find(p => p.id === id);
+    if (p) {
+      p.name = name; p.unit = unit; p.purchase_price = purchasePrice;
+      p.sale_price = salePrice; p.category = category;
+      p.low_stock_threshold = lowStockThreshold;
+    }
+    return;
+  }
+  const database = await getDatabase();
+  if (!database) return;
+  await database.runAsync(
+    `UPDATE products SET name = ?, unit = ?, purchase_price = ?, sale_price = ?, category = ?, low_stock_threshold = ?, updated_at = datetime('now') WHERE id = ?`,
+    [name, unit, purchasePrice, salePrice, category, lowStockThreshold, id]
+  );
+}
+
+export async function softDeleteProduct(id: number): Promise<void> {
+  if (isWeb) {
+    const p = webProducts.find(p => p.id === id);
+    if (p) { p.is_deleted = 1; p.deleted_at = new Date().toISOString(); }
+    return;
+  }
+  const database = await getDatabase();
+  if (!database) return;
+  await database.runAsync(
+    `UPDATE products SET is_deleted = 1, deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+    [id]
+  );
 }
 
 export async function updateProductStock(id: number, quantityChange: number): Promise<void> {
@@ -453,6 +532,44 @@ export async function getTransactions(customerId: number): Promise<Transaction[]
   );
 }
 
+export async function getAllTransactions(limit: number = 50, offset: number = 0): Promise<Transaction[]> {
+  if (isWeb) {
+    return webTransactions.filter(t => !t.is_deleted)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(offset, offset + limit);
+  }
+  const database = await getDatabase();
+  if (!database) return [];
+  return database.getAllAsync<Transaction>(
+    'SELECT * FROM transactions WHERE is_deleted = 0 ORDER BY date DESC LIMIT ? OFFSET ?',
+    [limit, offset]
+  );
+}
+
+export async function deleteTransaction(id: number): Promise<void> {
+  if (isWeb) {
+    const t = webTransactions.find(t => t.id === id);
+    if (t) {
+      t.is_deleted = 1;
+      const reverseAmount = t.type === 'credit' ? -t.amount : t.amount;
+      await updateCustomerBalance(t.customer_id, reverseAmount);
+    }
+    return;
+  }
+  const database = await getDatabase();
+  if (!database) return;
+  const txn = await database.getFirstAsync<Transaction>(
+    'SELECT * FROM transactions WHERE id = ?', [id]
+  );
+  if (txn) {
+    await database.runAsync(
+      `UPDATE transactions SET is_deleted = 1, deleted_at = datetime('now') WHERE id = ?`, [id]
+    );
+    const reverseAmount = txn.type === 'credit' ? -txn.amount : txn.amount;
+    await updateCustomerBalance(txn.customer_id, reverseAmount);
+  }
+}
+
 export async function addStockEntry(
   productId: number,
   type: string,
@@ -463,9 +580,16 @@ export async function addStockEntry(
   notes?: string
 ): Promise<number> {
   if (isWeb) {
+    const id = webNextStockId++;
+    webStockEntries.push({
+      id, product_id: productId, type, quantity, rate,
+      amount: quantity * rate, supplier_id: supplierId || null,
+      customer_id: customerId || null, notes: notes || null,
+      date: new Date().toISOString(), is_deleted: 0,
+    });
     if (type === 'in') await updateProductStock(productId, quantity);
     else if (type === 'out') await updateProductStock(productId, -quantity);
-    return 1;
+    return id;
   }
   const database = await getDatabase();
   if (!database) return 0;
@@ -485,7 +609,14 @@ export async function addStockEntry(
 }
 
 export async function getStockEntries(productId?: number, type?: string): Promise<StockEntry[]> {
-  if (isWeb) return [];
+  if (isWeb) {
+    return webStockEntries.filter(se => {
+      if (se.is_deleted) return false;
+      if (productId && se.product_id !== productId) return false;
+      if (type && se.type !== type) return false;
+      return true;
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
   const database = await getDatabase();
   if (!database) return [];
   let query = 'SELECT * FROM stock_entries WHERE is_deleted = 0';
@@ -502,6 +633,134 @@ export async function getStockEntries(productId?: number, type?: string): Promis
   query += ' ORDER BY date DESC';
 
   return database.getAllAsync<StockEntry>(query, params);
+}
+
+export async function createBill(
+  customerId: number | null,
+  items: Array<{ productId: number; quantity: number; price: number }>,
+  notes?: string
+): Promise<number> {
+  const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+
+  if (isWeb) {
+    const billNumber = webNextBillNumber++;
+    const billId = webNextBillId++;
+    webBills.push({
+      id: billId, bill_number: billNumber, customer_id: customerId,
+      total_amount: totalAmount, paid_amount: 0, status: 'unpaid',
+      date: new Date().toISOString(), notes: notes || null, is_deleted: 0,
+    });
+    for (const item of items) {
+      webBillItems.push({
+        id: webNextBillItemId++, bill_id: billId, product_id: item.productId,
+        quantity: item.quantity, price: item.price, total: item.quantity * item.price,
+      });
+      await updateProductStock(item.productId, -item.quantity);
+    }
+    if (customerId) {
+      await addTransaction(
+        customerId, 'credit', totalAmount, `Bill #${billNumber}`,
+      );
+    }
+    return billId;
+  }
+
+  const database = await getDatabase();
+  if (!database) return 0;
+
+  const lastBill = await database.getFirstAsync<{ bill_number: number }>(
+    'SELECT MAX(bill_number) as bill_number FROM bills'
+  );
+  const billNumber = (lastBill?.bill_number || 0) + 1;
+
+  const result = await database.runAsync(
+    `INSERT INTO bills (bill_number, customer_id, total_amount, paid_amount, status, notes) VALUES (?, ?, ?, ?, 'unpaid', ?)`,
+    [billNumber, customerId, totalAmount, 0, notes || '']
+  );
+  const billId = result.lastInsertRowId;
+
+  for (const item of items) {
+    await database.runAsync(
+      `INSERT INTO bill_items (bill_id, product_id, quantity, price, total) VALUES (?, ?, ?, ?, ?)`,
+      [billId, item.productId, item.quantity, item.price, item.quantity * item.price]
+    );
+    await updateProductStock(item.productId, -item.quantity);
+  }
+
+  if (customerId) {
+    await addTransaction(customerId, 'credit', totalAmount, `Bill #${billNumber}`);
+  }
+
+  return billId;
+}
+
+export async function getBills(customerId?: number, status?: string): Promise<Bill[]> {
+  if (isWeb) {
+    return webBills.filter(b => {
+      if (b.is_deleted) return false;
+      if (customerId && b.customer_id !== customerId) return false;
+      if (status && b.status !== status) return false;
+      return true;
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+  const database = await getDatabase();
+  if (!database) return [];
+  let query = 'SELECT * FROM bills WHERE is_deleted = 0';
+  const params: any[] = [];
+  if (customerId) {
+    query += ' AND customer_id = ?';
+    params.push(customerId);
+  }
+  if (status) {
+    query += ' AND status = ?';
+    params.push(status);
+  }
+  query += ' ORDER BY date DESC';
+  return database.getAllAsync<Bill>(query, params);
+}
+
+export async function getBill(id: number): Promise<Bill | null> {
+  if (isWeb) return webBills.find(b => b.id === id) || null;
+  const database = await getDatabase();
+  if (!database) return null;
+  return database.getFirstAsync<Bill>('SELECT * FROM bills WHERE id = ?', [id]);
+}
+
+export async function getBillItems(billId: number): Promise<BillItem[]> {
+  if (isWeb) {
+    return webBillItems.filter(bi => bi.bill_id === billId).map(bi => {
+      const product = webProducts.find(p => p.id === bi.product_id);
+      return { ...bi, product_name: product?.name, product_unit: product?.unit };
+    });
+  }
+  const database = await getDatabase();
+  if (!database) return [];
+  return database.getAllAsync<BillItem>(
+    `SELECT bi.*, p.name as product_name, p.unit as product_unit
+     FROM bill_items bi LEFT JOIN products p ON bi.product_id = p.id
+     WHERE bi.bill_id = ?`,
+    [billId]
+  );
+}
+
+export async function updateBillPayment(id: number, paidAmount: number): Promise<void> {
+  if (isWeb) {
+    const bill = webBills.find(b => b.id === id);
+    if (bill) {
+      bill.paid_amount = paidAmount;
+      bill.status = paidAmount >= bill.total_amount ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+    }
+    return;
+  }
+  const database = await getDatabase();
+  if (!database) return;
+  const bill = await database.getFirstAsync<Bill>('SELECT * FROM bills WHERE id = ?', [id]);
+  if (!bill) return;
+  const status = paidAmount >= bill.total_amount ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+  await database.runAsync(
+    `UPDATE bills SET paid_amount = ?, status = ? WHERE id = ?`,
+    [paidAmount, status, id]
+  );
 }
 
 export async function getDashboardStats(): Promise<{
@@ -522,7 +781,7 @@ export async function getDashboardStats(): Promise<{
       customerCount: customerList.length,
       supplierCount: supplierList.length,
       totalProducts: webProducts.filter(p => !p.is_deleted).length,
-      lowStockCount: webProducts.filter(p => !p.is_deleted && p.stock_quantity <= p.low_stock_threshold && p.stock_quantity > 0).length,
+      lowStockCount: webProducts.filter(p => !p.is_deleted && p.stock_quantity <= p.low_stock_threshold && p.stock_quantity >= 0).length,
     };
   }
   const database = await getDatabase();
@@ -544,7 +803,7 @@ export async function getDashboardStats(): Promise<{
     'SELECT COUNT(*) as count FROM products WHERE is_deleted = 0'
   );
   const lowStock = await database.getFirstAsync<{ count: number }>(
-    'SELECT COUNT(*) as count FROM products WHERE is_deleted = 0 AND stock_quantity <= low_stock_threshold AND stock_quantity > 0'
+    'SELECT COUNT(*) as count FROM products WHERE is_deleted = 0 AND stock_quantity <= low_stock_threshold'
   );
 
   return {
@@ -555,4 +814,81 @@ export async function getDashboardStats(): Promise<{
     totalProducts: productCount?.count || 0,
     lowStockCount: lowStock?.count || 0,
   };
+}
+
+export async function getMonthlyStats(year: number, month: number): Promise<{
+  totalSales: number;
+  totalPayments: number;
+  totalBills: number;
+  billCount: number;
+}> {
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  const endMonth = month === 12 ? 1 : month + 1;
+  const endYear = month === 12 ? year + 1 : year;
+  const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+  if (isWeb) {
+    const monthTxns = webTransactions.filter(t =>
+      !t.is_deleted && t.date >= startDate && t.date < endDate
+    );
+    const monthBills = webBills.filter(b =>
+      !b.is_deleted && b.date >= startDate && b.date < endDate
+    );
+    return {
+      totalSales: monthTxns.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0),
+      totalPayments: monthTxns.filter(t => t.type === 'payment').reduce((s, t) => s + t.amount, 0),
+      totalBills: monthBills.reduce((s, b) => s + b.total_amount, 0),
+      billCount: monthBills.length,
+    };
+  }
+  const database = await getDatabase();
+  if (!database) return { totalSales: 0, totalPayments: 0, totalBills: 0, billCount: 0 };
+
+  const sales = await database.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE type = 'credit' AND is_deleted = 0 AND date >= ? AND date < ?`,
+    [startDate, endDate]
+  );
+  const payments = await database.getFirstAsync<{ total: number }>(
+    `SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE type = 'payment' AND is_deleted = 0 AND date >= ? AND date < ?`,
+    [startDate, endDate]
+  );
+  const billStats = await database.getFirstAsync<{ total: number; count: number }>(
+    `SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count FROM bills WHERE is_deleted = 0 AND date >= ? AND date < ?`,
+    [startDate, endDate]
+  );
+
+  return {
+    totalSales: sales?.total || 0,
+    totalPayments: payments?.total || 0,
+    totalBills: billStats?.total || 0,
+    billCount: billStats?.count || 0,
+  };
+}
+
+export async function searchCustomers(query: string): Promise<Customer[]> {
+  if (isWeb) {
+    const q = query.toLowerCase();
+    return webCustomers.filter(c =>
+      !c.is_deleted && (c.name.toLowerCase().includes(q) || c.phone.includes(q))
+    );
+  }
+  const database = await getDatabase();
+  if (!database) return [];
+  return database.getAllAsync<Customer>(
+    'SELECT * FROM customers WHERE is_deleted = 0 AND (name LIKE ? OR phone LIKE ?) ORDER BY name ASC LIMIT 20',
+    [`%${query}%`, `%${query}%`]
+  );
+}
+
+export async function searchProducts(query: string): Promise<Product[]> {
+  if (isWeb) {
+    const q = query.toLowerCase();
+    return webProducts.filter(p => !p.is_deleted && p.name.toLowerCase().includes(q));
+  }
+  const database = await getDatabase();
+  if (!database) return [];
+  return database.getAllAsync<Product>(
+    'SELECT * FROM products WHERE is_deleted = 0 AND name LIKE ? ORDER BY name ASC LIMIT 20',
+    [`%${query}%`]
+  );
 }
