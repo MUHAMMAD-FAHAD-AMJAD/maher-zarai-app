@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Maher Zarai Markaz"
+version = "1.0.0"
+id = "artifacts/maher-zari"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 23880
+
+[services.development]
+run = "pnpm --filter @workspace/maher-zari run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/maher-zari", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/maher-zari", "run", "serve" ]
+
+[services.env]
+PORT = "23880"
+BASE_PATH = "/"

@@ -94,3 +94,39 @@ Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHea
 ### `scripts` (`@workspace/scripts`)
 
 Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.
+
+### `artifacts/maher-zari` (`@workspace/maher-zari`)
+
+Expo React Native mobile app for **Maher Zarai Markaz** — a pesticide/agricultural shop in Rawalpindi. Replaces DigiKhata with offline-first functionality.
+
+- **Platform**: Android APK (direct install, no Play Store). Web preview available for development.
+- **Auth**: 6-digit PIN login (Admin PIN: 000000, Viewer PIN: 111111) + fingerprint biometric
+- **Roles**: Admin (full CRUD access), Viewer (read-only)
+- **Database**: expo-sqlite (SQLite) for offline-first storage. On web preview, uses in-memory mock data from seed arrays.
+- **Theme**: Primary Orange #FF6B35, Red #E53935, Green #2E7D32, Background #F5F5F5
+- **Navigation**: 5 tabs — Khata (customer ledger), Stock (inventory), Bills, Scanner (AI notebook), More (settings/reports)
+
+#### Key Files
+- `app/_layout.tsx` — Root layout with DB init, AuthProvider, navigation stack
+- `app/login.tsx` — 6-digit PIN login screen
+- `app/index.tsx` — Auth redirect (login or tabs)
+- `app/(tabs)/_layout.tsx` — 5-tab navigation
+- `contexts/AuthContext.tsx` — Authentication context (admin/viewer roles, PIN/biometric)
+- `database/index.ts` — All SQLite CRUD operations + web fallback with in-memory data
+- `database/schema.ts` — Table CREATE statements (customers, products, transactions, bills, stock_entries, settings)
+- `data/customers.ts` — 119 seeded customers from DigiKhata export
+- `data/products.ts` — 170+ seeded products from DigiKhata All Items export
+- `constants/colors.ts` — Color palette
+- `constants/theme.ts` — Typography, spacing, shadows
+
+#### Seed Data
+- 119 customers imported from DigiKhata PDF (with opening balances)
+- 170+ products imported from DigiKhata All Items PDF (with current stock levels)
+- Total receivable: ~Rs 2.4M across customers
+- 1 supplier: Ahmad Khan Lalian (Rs 14,967 payable)
+
+#### Phase Status
+- **Phase 1 (Foundation)**: COMPLETE — PIN login, 5-tab navigation, database layer, seed data, all screens built
+- **Phase 2 (Full Khata)**: PENDING — Full transaction history, bill generation, WhatsApp sharing, PDF export
+- **Phase 3 (AI Scanner)**: PENDING — Gemini 1.5 Flash Urdu handwriting recognition
+- **Phase 4 (Backup)**: PENDING — Google Drive automatic backup
