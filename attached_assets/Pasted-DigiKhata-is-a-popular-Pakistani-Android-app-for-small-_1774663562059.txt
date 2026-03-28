@@ -1,0 +1,43 @@
+DigiKhata is a popular Pakistani Android app for small businesses, serving as a digital khata (ledger) with features for ledger management, inventory, invoicing, and more. It supports offline use, multi-language (English, Urdu), and free SMS/WhatsApp reminders, tailored for shops like groceries and pharmacies.
+
+Main Screens
+Home/Dashboard screen shows sections for Customers, Suppliers, CashBook, Stock Book, Bills, Staff, and a "More" button for additional options like Settings. Customer ledger lists all customers with balances; tap to view/edit details like name, photo, phone, address. Supplier screen mirrors customers but for suppliers; select from top tab. Other screens include CashBook for in/out entries, Stock Book for inventory, Bill Book for invoices, Staff Book for attendance/payroll, and Reports via PDF downloads.
+
+Navigation Flow
+From Home, tap tabs/buttons like "Customers," "Suppliers," "Stock Book," "Create new bill." "More" leads to Settings, Backup. Entry flows: Add customer → Enter name/phone → Save → Add transaction from ledger. Stock: Home → Stock Book → Add Item → Stock In/Out. Bills: Create new bill → Add items → Select party → Save → Share. Search appears on ledger/customer screens to filter by name/date.
+
+Customer Management
+Create via "Add new customer" on Home: name, phone (from contacts or manual), continue to save; edit name/photo/address/delete. View ledger: list with balances, add transactions (credit/debit, amount, description up to 5 visible lines), audit balances.[ review] Pakistani feature: Udhaar (credit) tracking with free SMS reminders to collect debts 3x faster.
+
+Supplier Management
+Tap "Suppliers" on Home top, "Add new supplier": same fields as customers (name, phone), save. Manage ledgers similarly: transactions, balances, PDF reports.
+
+Transaction Recording
+Types: Cash In/Out (CashBook), Credit/Debit (ledgers), Expenses (categories), Stock In/Out. Fields: date, amount, description (details box, expandable in edit), customer/supplier link.[ review] Real-time updates; categorized for reports.
+
+Inventory Management
+Stock Book: Add Item (name, unit, rate, quantity, picture, barcode scan), Stock In (purchase qty/details), Stock Out (sale qty). Tracks stock in hand status; set custom prices; link to bills for sales.
+
+Bill Creation
+"Create new bill": Add items (from stock), details (qty, rate), select Credit party, bill number, save entry. View bill → Download PDF, Share WhatsApp, Edit/Delete. Generates receipts/invoices quickly.
+
+Reports
+PDF reports: Ledger summaries (credit/debit totals, transactions list with date/name/desc/amount), cash flow, expenses. Daily/weekly/monthly views; transaction summaries (e.g., 388 txns, totals Rs 34M credit). Free download online/offline.
+
+Settings and Backup
+"More" → Settings → Backup: Check/update cloud backup (encrypted, multi-device sync). Other: Languages (Urdu/English), business card creation/share WhatsApp, data security. Offline access with sync on connect.
+
+Dashboard Elements
+Home shows real-time cash flow, balances overview, quick add buttons (customer/supplier). Widgets likely include total cash, outstanding udhaar, stock levels (inferred from reviews/tutorials).
+
+Search and Notifications
+Search: On ledger screens, filter customers/transactions by name/date. Notifications: Unlimited free SMS/WhatsApp payment reminders; push for backups/low stock (inferred). Request money links via SMS/WhatsApp.
+
+Sharing Features
+Share PDFs (ledgers/reports/bills) via WhatsApp; business cards; invoices/receipts. No direct print, but users request Bluetooth thermal support.[ review]
+
+Design and Premium
+Visuals: Simple interface for small biz, likely green/blue theme (Pakistani app norm, no exact colors/fonts detailed). Free core features; in-app purchases/ads suggest premium (e.g., ad-free, advanced reports?). Multi-user sharing free.
+
+Unique Pakistani Features
+Udhaar/khata ledgers, free SMS reminders (local networks), Urdu support, tailored for dukaans (dairy/grocery/jewelry). Cloud sync for partners, barcode for local inventory.
